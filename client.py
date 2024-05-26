@@ -1,36 +1,57 @@
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
 import socket
-import random
 
+client_private_key = rsa.generate_private_key(
+    public_exponent=65537,
+    key_size=2048
+)
 
-def power(base, exp, mod):
-    result = 1
-    base = base % mod
-    while exp > 0:
-        if exp % 2 == 1:
-            result = (result * base) % mod
-        exp = exp >> 1
-        base = (base * base) % mod
-    return result
+client_public_key = client_private_key.public_key()
 
+def receiving(conn):
+    data = conn.recv(1024)
+    return data
 
-def diffie_hellman_client():
-    p = 14
-    g = 7
+def sending(conn, message):
+    conn.send(message)
 
+def client():
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect(('localhost', 12345))
 
-    B = int(client_socket.recv(1024).decode())
+    sending(client_socket, client_public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ))
 
-    b = random.randint(1, p - 1)
-    B = power(g, b, p)
-    client_socket.send(str(B).encode())
+    server_public_key = serialization.load_pem_public_key(
+        receiving(client_socket),
+    )
 
-    K = power(B, b, p)
+    while True:
+        message = input("Сообщение для сервера: ")
+        encrypted_message = server_public_key.encrypt(
+            message.encode(),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        sending(client_socket, encrypted_message)
 
-    print("Секретное число:", K)
+        encrypted_response = receiving(client_socket)
+        decrypted_response = client_private_key.decrypt(
+            encrypted_response,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        print("Ответ от сервера:", decrypted_response.decode())
 
-    client_socket.close()
-
-
-diffie_hellman_client()
+client()
